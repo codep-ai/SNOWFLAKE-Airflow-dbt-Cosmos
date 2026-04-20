@@ -1,7 +1,11 @@
 """ai_framework_refresh — Weekly TinyFish auto-refresh of AI governance seeds.
 
+Regulators rarely change AI governance content within a week — weekly
+cadence matches reality without burning compute / TinyFish budget on
+pointless daily scans.
+
 Reads datapai.sys_common_config rows (config_type='ai_framework_refresh'),
-filters enabled frameworks whose cadence has elapsed, for each:
+for each enabled framework:
   1. TinyFish fetch source_url
   2. AI-extract via extractor_prompt_path
   3. Diff vs current ai_controls_seed.csv
@@ -9,7 +13,7 @@ filters enabled frameworks whose cadence has elapsed, for each:
   5. Notify #ai-governance Slack channel
   6. Update last_refreshed_at in sys_common_config
 
-Scheduled daily 03:00 AEDT — script filters by cadence_days internally.
+Scheduled Sunday 03:00 AEDT — low-traffic window, one-shot per week.
 """
 from datetime import datetime, timedelta
 import pendulum
@@ -21,7 +25,7 @@ SYDNEY_TZ = pendulum.timezone("Australia/Sydney")
 @dag(
     dag_id="ai_framework_refresh",
     default_args={**DEFAULT_ARGS, "retries": 1, "retry_delay": timedelta(minutes=10), "execution_timeout": timedelta(minutes=60)},
-    schedule="0 3 * * *",
+    schedule="0 3 * * 0",   # Sunday 03:00 AEDT — weekly
     start_date=datetime(2026, 4, 21, tzinfo=SYDNEY_TZ),
     catchup=False,
     tags=["datapai", "governance", "tinyfish", "ai_framework_refresh"],
