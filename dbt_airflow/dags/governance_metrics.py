@@ -23,6 +23,7 @@ Pre-requisite:
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from airflow import Dataset
 from cosmos import DbtDag, ProjectConfig, ProfileConfig, ExecutionConfig
 from cosmos.profiles import DuckDBUserPasswordProfileMapping
 
@@ -57,7 +58,11 @@ governance_metrics = DbtDag(
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
     },
-    schedule_interval="@daily",
+    # Auto-trigger when the upstream ETL lands fresh Iceberg data.
+    # Falls back to daily cadence as a safety net.
+    schedule=[
+        Dataset("s3://datapai-governance/iceberg/fct_ai_guardrail_decision_flat/"),
+    ],
     start_date=datetime(2026, 4, 21),
     catchup=False,
     tags=["datapai", "governance", "dbt", "cosmos", "metricflow"],
