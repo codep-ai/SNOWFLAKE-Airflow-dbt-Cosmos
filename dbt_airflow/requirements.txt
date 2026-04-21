@@ -1,5 +1,5 @@
 # Astro Runtime includes the following pre-installed providers packages: https://docs.astronomer.io/astro/runtime-image-architecture#provider-packages
-astronomer-cosmos
+astronomer-cosmos>=1.7.1,<1.8.0
 dbt-core==1.7.7
 dbt-snowflake==1.7.1
 #dbt-core==1.6.9
