@@ -28,7 +28,7 @@ from cosmos import DbtDag, ProjectConfig, ProfileConfig, ExecutionConfig
 from cosmos.profiles import DuckDBUserPasswordProfileMapping
 
 DBT_EXECUTABLE = "/usr/local/airflow/dbt_venv_governance/bin/dbt"
-DBT_PROJECT_PATH = Path("/usr/local/airflow/dags/dbt/datapai-dbt-governance")
+DBT_PROJECT_PATH = Path("/usr/local/airflow/dags/datapai-dbt-governance")
 
 # DuckDB profile — uses an Airflow connection for any S3 / iceberg creds.
 # For the DuckDB target, the "database" is just the path to the .duckdb file
