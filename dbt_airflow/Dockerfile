@@ -14,3 +14,18 @@ COPY requirements.txt /tmp
 RUN python3.8 -m pip install -r /tmp/requirements.txt
 
 RUN python3.8 -m venv dbt_venv && . dbt_venv/bin/activate && pip install --no-cache-dir dbt-snowflake && pip install --no-cache-dir snowflake-connector-python==3.7.0 && pip install --no-cache-dir dbt-postgres && deactivate
+
+# ─── Second dbt venv for datapai-dbt-governance ──────────────────────────
+# Isolated from dbt_venv (Py3.8/dbt1.7) because MetricFlow requires Py3.10+.
+# Debian bookworm ships python3.11 in the default repos.
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3.11 python3.11-venv python3.11-dev && \
+    rm -rf /var/lib/apt/lists/*
+USER astro
+
+COPY requirements-governance.txt /tmp/
+RUN python3.11 -m venv /usr/local/airflow/dbt_venv_governance && \
+    . /usr/local/airflow/dbt_venv_governance/bin/activate && \
+    pip install --no-cache-dir -r /tmp/requirements-governance.txt && \
+    deactivate

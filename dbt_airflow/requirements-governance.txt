@@ -1,0 +1,10 @@
+# dbt 1.9 + MetricFlow + multi-adapter for datapai-dbt-governance.
+# Isolated from the main dbt_venv (which is Python 3.8 / dbt 1.7) because
+# MetricFlow requires Python 3.10+. Lives in dbt_venv_governance.
+dbt-core==1.9.1
+dbt-duckdb==1.9.1
+dbt-snowflake==1.9.1
+dbt-redshift==1.9.0
+dbt-bigquery==1.9.0
+dbt-postgres==1.9.1
+dbt-metricflow
