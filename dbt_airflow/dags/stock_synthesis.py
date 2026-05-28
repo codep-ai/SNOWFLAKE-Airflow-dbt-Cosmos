@@ -1,19 +1,22 @@
 """
 stock_synthesis — AG2 multi-agent stock signal synthesis.
 
-DYNAMIC UNIVERSE (2026-05-24): instead of hardcoding the ticker list, the
-DAG resolves it at parse time by calling load_synthesis_universe() in
-datapai-stock-be/scripts/lib/ticker_loader.py. That function returns the
-union of:
+DYNAMIC UNIVERSE (2026-05-24, fixed 2026-05-28): resolves the ticker list
+at DAG-parse time by querying datapai.market_demo_stocks (landing-page
+top-20 per exchange) UNION datapai.watchlist (all user-watchlisted
+tickers), filtered to those with fundamental_lite data.
 
-  1. Landing-page top-20 per exchange (datapai.market_demo_stocks) — what
-     every visitor sees on /us, /asx, /vietnam, /hongkong, etc.
-  2. All user watchlist tickers (datapai.watchlist) — what users actually
-     care to track.
+⚠ Lesson learned (2026-05-28): the first version of this DAG tried to
+import from /home/ec2-user/git/datapai-stock-be which does not exist
+inside the Airflow container's filesystem (the repo is mounted at
+/opt/datapai-stock there, but that container path is irrelevant — the
+right move is to query the DB directly from inside the DAG). That broken
+import caused 6 days of zero-task DAG runs that completed silently.
 
-filtered to tickers we have fundamental_lite data for. Adds/promotions on
-the FE or new watchlist entries are automatically synthesized the next
-night — no DAG redeploy required.
+This version:
+  - Queries stock_db directly via 127.0.0.1:5434 (Airflow uses host network)
+  - Falls back to a known-good hardcoded list if SQL fails — DAG never
+    silently produces zero tasks again.
 
 ASX: 18:00 AEDT Mon-Fri. US: 18:00 ET Mon-Fri. Max 2 tasks at a time.
 """
@@ -29,25 +32,81 @@ NY_TZ = pendulum.timezone("America/New_York")
 log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────
-# Resolve the synthesis universe at DAG parse time.
-# DAG parsing happens every ~30s by Airflow's scheduler, so the universe
-# auto-refreshes from DB without any redeploy. Empty result is treated as
-# "no work tonight" — better than crashing the DAG.
+# Hardcoded fallback — used only if the DB query fails at DAG parse time.
+# Keep this list a known-good baseline so the DAG never produces a
+# zero-task run silently (the failure mode we hit 2026-05-24..28).
 # ──────────────────────────────────────────────────────────────────────────
+_FALLBACK_ASX = [
+    "BHP", "CBA", "CSL", "NAB", "ANZ", "WBC", "WES", "MQG",
+    "TLS", "WOW", "RIO", "FMG", "TWE", "GMG", "STO", "ORG", "WDS", "QAN",
+]
+_FALLBACK_US = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
+    "JPM", "V", "JNJ", "WMT", "XOM", "UNH", "HD", "MA",
+    "BAC", "PFE", "AVGO", "CRM", "KO",
+]
+
+
 def _resolve_universe(exchange: str) -> list[str]:
-    """Return list of tickers for an exchange. Fail-soft → empty list on error."""
+    """
+    Pull the dynamic synthesis universe for `exchange` from stock_db.
+
+    Universe = (top-20 landing-page stocks per exchange) ∪ (all user
+    watchlist symbols), filtered to those with fundamental_lite data so
+    AG2 has signals to debate. NASDAQ/NYSE rows are coerced to 'US' so
+    they match the analysis tables.
+
+    Returns a hardcoded fallback list on any error so the DAG always
+    schedules tasks (no more silent zero-task runs).
+    """
     try:
-        import sys
-        sys.path.insert(0, "/home/ec2-user/git/datapai-stock-be")
-        from scripts.lib.ticker_loader import load_synthesis_universe
-        pairs = load_synthesis_universe(exchange=exchange)
-        tickers = [t for (t, _ex) in pairs]
-        log.info("[%s] universe resolved at DAG parse: %d tickers — %s",
-                 exchange, len(tickers), ", ".join(tickers[:10]) + ("…" if len(tickers) > 10 else ""))
-        return tickers
+        import psycopg2
+    except ImportError:
+        log.warning("[%s] psycopg2 not in container — using fallback", exchange)
+        return _FALLBACK_ASX if exchange == "ASX" else _FALLBACK_US
+
+    sql = """
+        WITH wanted AS (
+            SELECT ticker,
+                   CASE WHEN exchange IN ('NASDAQ','NYSE') THEN 'US' ELSE exchange END AS exchange
+            FROM datapai.market_demo_stocks
+            WHERE display_order <= 20
+            UNION
+            SELECT symbol AS ticker,
+                   CASE WHEN exchange IN ('NASDAQ','NYSE') THEN 'US' ELSE exchange END AS exchange
+            FROM datapai.watchlist
+        )
+        SELECT DISTINCT w.ticker
+        FROM wanted w
+        JOIN datapai.fundamental_lite f
+          ON f.ticker = w.ticker AND f.exchange = w.exchange
+        WHERE w.exchange = %s
+        ORDER BY w.ticker
+    """
+    try:
+        conn = psycopg2.connect(
+            host="127.0.0.1", port=5434,
+            user="postgres", password="postgres",
+            dbname="postgres", connect_timeout=5,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, (exchange,))
+                tickers = [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
     except Exception as exc:
-        log.warning("[%s] universe resolve failed (%s) — running zero tasks tonight", exchange, exc)
-        return []
+        log.warning("[%s] universe SQL failed (%s) — using fallback", exchange, exc)
+        return _FALLBACK_ASX if exchange == "ASX" else _FALLBACK_US
+
+    if not tickers:
+        log.warning("[%s] universe SQL returned 0 tickers — using fallback", exchange)
+        return _FALLBACK_ASX if exchange == "ASX" else _FALLBACK_US
+
+    log.info("[%s] universe resolved at DAG parse: %d tickers — %s",
+             exchange, len(tickers),
+             ", ".join(tickers[:10]) + ("…" if len(tickers) > 10 else ""))
+    return tickers
 
 
 ASX_TICKERS = _resolve_universe("ASX")
