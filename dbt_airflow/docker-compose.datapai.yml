@@ -1,0 +1,76 @@
+# DataPAI Airflow — open-source stack
+# Usage: docker compose -f docker-compose.datapai.yml up -d
+# UI: http://localhost:8180 (admin/datapai)
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.datapai
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@localhost:5432/postgres?options=-csearch_path%3Dairflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__WEBSERVER__WEB_SERVER_PORT: '8180'
+    AIRFLOW__CORE__PARALLELISM: '16'
+    YF_CACHE_DIR: '/tmp/yfinance_cache'
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: '8'
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: '30'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__WEBSERVER__SECRET_KEY: datapai-airflow-secret-key
+    AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE: 'false'
+    DATAPAI_SCRIPTS_DIR: /opt/datapai/scripts
+    DATAPAI_PROJECT_DIR: /opt/datapai
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - /home/ec2-user/git/datapai-platform-be:/opt/datapai
+    - /home/ec2-user/git/datapai-stock-be:/opt/datapai-stock
+    - /home/ec2-user/git/dbt-demo:/home/ec2-user/git/dbt-demo
+    - /home/ec2-user/.dbt:/home/ec2-user/.dbt:ro
+    - /tmp/airbyte_user.p8:/snowflake-keys/airbyte_user.p8:ro
+    - /home/ec2-user/.bash_profile:/opt/airflow/.bash_profile:ro
+    - /home/ec2-user/.env.dev:/opt/datapai/.env.dev:ro
+    - /var/log/datapai:/var/log/datapai
+  network_mode: host
+  restart: unless-stopped
+
+services:
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname DataPAI \
+          --role Admin \
+          --email admin@datap.ai \
+          --password datapai 2>/dev/null || true
+        echo "Airflow init complete"
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: airflow webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: airflow scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: airflow triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
