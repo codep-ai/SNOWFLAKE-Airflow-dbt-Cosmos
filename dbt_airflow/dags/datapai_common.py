@@ -1,5 +1,5 @@
 """
-dags/datapai_common.py — shared helpers for all DataPAI Airflow DAGs.
+dags/stock_common.py — shared helpers for all DataPAI Airflow DAGs.
 Scripts use container Python 3.11 with all deps installed.
 
 Key fix: uses /tmp paths for caches and logs to avoid permission issues
@@ -9,8 +9,9 @@ from __future__ import annotations
 from datetime import timedelta
 from airflow.operators.bash import BashOperator
 
-SCRIPTS_DIR = "/opt/datapai/scripts"
-PROJECT_DIR = "/opt/datapai"
+SCRIPTS_DIR = "/opt/datapai-stock/scripts"
+PROJECT_DIR = "/opt/datapai-stock"
+PLATFORM_DIR = "/opt/datapai"
 
 DEFAULT_ARGS = {
     "owner": "datapai",
@@ -32,12 +33,12 @@ set -euo pipefail
 _DAG_ID="$${AIRFLOW_CTX_DAG_ID:-default}"
 _TASK_ID="$${AIRFLOW_CTX_TASK_ID:-default}"
 
-export DATAPAI_LOG_DIR="/tmp/datapai_logs/$${_DAG_ID}"
+export DATAPAI_LOG_DIR="/tmp/stock_logs/$${_DAG_ID}"
 export YF_CACHE_DIR="/tmp/yfinance_cache/$${_DAG_ID}/$${_TASK_ID}"
-export HOME="/tmp/datapai_home/$${_DAG_ID}"
+export HOME="/tmp/stock_home/$${_DAG_ID}"
 
 mkdir -p "$DATAPAI_LOG_DIR" "$YF_CACHE_DIR" "$HOME/.cache" 2>/dev/null || true
-mkdir -p /opt/datapai/scripts/logs 2>/dev/null || true
+mkdir -p /opt/datapai-stock/scripts/logs 2>/dev/null || true
 
 # Source credentials (env vars, API keys)
 set +u
@@ -46,7 +47,29 @@ set +u
 [[ -f /opt/datapai/.env ]] && set -a && source /opt/datapai/.env && set +a || true
 set -u
 
-cd /opt/datapai
+# Mark this as a SCHEDULED LLM call, after the env files are sourced so it
+# cannot be overwritten by them.
+#
+# /opt/datapai/.env.dev is a bind mount of /home/ec2-user/.env.dev -- the very
+# same file the live FastAPI services read. So LLM_MODE in there cannot
+# separate nightly DAG spend from interactive demo traffic: turning the DAGs
+# down would take the demo down with them.
+#
+# Everything that runs without this marker is treated as 'adhoc' and keeps its
+# paid provider. Only tasks launched through datapai_bash_task carry it, and
+# agents/llm_policy.py maps it to a mode:
+#   local (default) -> Ollama on this host, $0
+#   off             -> refuse the call
+#   paid            -> bill the cloud provider as before
+# Change it in sys_common_config (config_type='llm', key 'scheduled_mode')
+# without a redeploy; DATAPAI_SCHEDULED_LLM_MODE below is the fallback.
+export DATAPAI_LLM_CLASS=scheduled
+
+# Platform framework on PYTHONPATH so stock scripts can import agents.llm_client etc.
+export DATAPAI_PLATFORM_DIR="/opt/datapai"
+export PYTHONPATH="/opt/datapai-stock:/opt/datapai:$${PYTHONPATH:-}"
+
+cd /opt/datapai-stock
 """
 
 
