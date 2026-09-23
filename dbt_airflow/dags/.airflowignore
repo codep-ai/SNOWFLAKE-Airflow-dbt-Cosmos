@@ -1,0 +1,6 @@
+# regex on paths relative to the dags folder (Airflow default syntax)
+# virtualenvs inside the symlinked repos (dbt-demo/xengine_stock/.venv_airflow, …) contain lib64 -> lib links that loop the DAG walk
+\.venv
+node_modules
+\.git/
+target/
